@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Parser where
 
 import Text.Parsec
@@ -7,29 +7,28 @@ import Text.Parsec.Char
 import Control.Monad.Identity
 import Control.Monad.Trans
 import Debug.Trace
-
-#define PARSER(X) = (Stream s m Char) => ParsecT s u m X
-
---parseQS = parse expression "" 
+import Data.Maybe
 
 type Name = String
 
-data Expression = Assignment Name Expression
+data Expression = Assignment Name Expression Bool
+                | ReturnStatement Expression
                 | VariableCall Name
                 | FunctionCall Name [Expression]
-                | FunctionDefinition [Name] [Expression]
+                | FunctionDefinition (Maybe Name) [Name] [Expression]
                 | NumberLiteral Integer
-                | Stringliteral String
+                | StringLiteral String
+                | InfixOperation String Expression Expression
                 | EmptyLine
                 | WhiteSpace
                   deriving (Show, Read, Eq)
 
 language :: (Stream s m Char) => ParsecT s u m [Expression]
-language = fmap removeWhiteSpace $ manyTill topLevelExpression (try eof)
+language = fmap removeWhiteSpace $ manyTill statement (try eof)
 
-topLevelExpression :: (Stream s m Char) => ParsecT s u m Expression
-topLevelExpression = trace "Parsing top level expression" $ do
-  exp <- expression <?> "Top Level Expression"
+statement :: (Stream s m Char) => ParsecT s u m Expression
+statement = trace "Parsing top level expression" $ do
+  exp <- expression <?> "Statement"
   optional $ try endOfExpression
   return exp
 
@@ -38,7 +37,7 @@ endOfExpression = try (char ';') <|> try newline
 
 expression :: (Stream s m Char) => ParsecT s u m Expression
 expression = trace "Parsing expression" $ do
-  try whitespace <|> try functionDefinition <|> try assignment <|> try functionCall <|> try variableCall 
+               try infixOperation <|> try whitespace <|> try functionDefinition <|> try returnStatement <|> try assignment <|> try functionCall <|> try variableCall 
   
 whitespace :: (Stream s m Char) => ParsecT s u m Expression
 whitespace = trace "Parsing whitespace" $ (try space <|> try newline)  >> return WhiteSpace
@@ -48,16 +47,25 @@ getName = trace "Parsing name" $ do many letter
 
 assignment :: (Stream s m Char) => ParsecT s u m Expression
 assignment = trace "Parsing assignment" $ do 
+  global <- optionMaybe $ try $ string "global"
+  try spaces
   varibleName <- getName
   try spaces
   oneOf "="
   try spaces
-  value <- try literal <|> try expression 
-  return $ Assignment varibleName value
+  value <- try expression <|> try literal
+  lookAhead $ endOfExpression <|> (eof >> return ' ')
+  return $ Assignment varibleName value (isJust global)
 
 literal :: (Stream s m Char) => ParsecT s u m Expression
 literal = trace "Parsing literal" $ do
-  try numberLiteral <|> try stringLiteral 
+  lit <- try numberLiteral <|> try stringLiteral 
+  return lit
+      
+
+endOfLiteral :: (Stream s m Char) => ParsecT s u m Char
+endOfLiteral = do try (spaces) 
+                  try (char ')') <|> try (char ';') <|> try newline <|> (try eof >> return ' ')
 
 numberLiteral :: (Stream s m Char) => ParsecT s u m Expression
 numberLiteral = trace "Parsing number literal" $ do 
@@ -68,7 +76,7 @@ stringLiteral :: (Stream s m Char) => ParsecT s u m Expression
 stringLiteral = trace "Parsing string literal" $ do 
   char '"' <|> char '\''
   str <- manyTill anyChar ((try $ char '"') <|> (try $ char '\''))
-  return $ Stringliteral str
+  return $ StringLiteral str
 
 variableCall :: (Stream s m Char) => ParsecT s u m Expression
 variableCall = trace "Parsing variable call" $ do
@@ -81,7 +89,7 @@ functionCall = trace "Parsing function call" $ do
                  try spaces
                  char '('
                  try spaces
-                 args <- try ((literal <|> expression) `sepBy` (try spaces >> char ',' >> try spaces)) <|> return []
+                 args <- try ((expression <|> literal) `sepBy` (try spaces >> char ',' >> try spaces)) <|> return []
                  try spaces 
                  char ')'
                  return $ FunctionCall name args
@@ -91,17 +99,35 @@ functionDefinition :: (Stream s m Char) => ParsecT s u m Expression
 functionDefinition = trace "Parsing function definition" $ do
   string "function"
   try spaces
+  name <- optionMaybe $ many1 letter
+  try spaces
   char '('
   params <- parameters <?> "Function parameters"
   try spaces
   char ')'
   try spaces 
   char '{'
-  exps <- (fmap removeWhiteSpace $ manyTill topLevelExpression (char '}')) <?> "Function body"
-  return $ FunctionDefinition params exps
+  exps <- (fmap removeWhiteSpace $ manyTill statement (char '}')) <?> "Function body"
+  return $ FunctionDefinition name params exps
+
+returnStatement :: (Stream s m Char) => ParsecT s u m Expression
+returnStatement = trace "Parsing return statement" $ do
+                    string "return"
+                    spaces
+                    exp <- try literal <|> try expression 
+                    return $ ReturnStatement exp
 
 removeWhiteSpace = filter (/= WhiteSpace) 
 
 parameters :: (Stream s m Char) => ParsecT s u m [Name]
 parameters = sepBy getName (try spaces >> char ',' >> try spaces) <|> return []
 
+infixOperation :: (Stream s m Char) => ParsecT s u m Expression
+infixOperation = trace "Parsing infix operation" $ do
+  exp1 <- try literal <|> try functionCall <|> try variableCall
+  try spaces
+  pred <- operator
+  try spaces
+  exp2 <- try literal <|> try functionCall <|> try variableCall
+  trace "IS INFIX" $ do return $ InfixOperation pred exp1 exp2
+  where operator = (try $ string ">") <|> (try $ string "<") <|> (try $ string "==") <|> (try $ string "!=") <|> (try $ string ">=") <|> (try $ string "<=")
