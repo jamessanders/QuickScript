@@ -1,24 +1,20 @@
-module JS (module Parser, evalJS) where
+module JS (module Parser2, evalJS) where
 import Data.List
 import Data.Maybe
-import Parser
-eval (Assignment name exp global) = (if global then "" else "var ") ++ name ++ " = " ++ eval exp 
-eval (ReturnStatement exp) = "return " ++ eval exp 
-eval (VariableCall name)   = name
-eval (InfixOperation op ex1 ex2) = eval ex1 ++ " " ++ op ++ " " ++ eval ex2
-eval (FunctionCall name exps) = name ++ "(" ++ (intercalate "," $ map eval exps) ++ ")"
-eval (NumberLiteral n) = show n
-eval (StringLiteral s) = s
-eval (FunctionDefinition name params exps) = "function " 
-                                             ++ (maybe "" (++ " ") name) 
-                                             ++ "("
-                                             ++ (intercalate "," params) 
-                                             ++ ")"
-                                             ++ " { \n" 
-                                             ++ intercalate ";\n" (map ("\t" ++) (evalJS' exps))
-                                             ++ "\n}"
+import Parser2
 
-evalJS' parsed = (map eval parsed)
+evalExpr (NullLiteral) = "null"
+evalExpr (BoolLiteral True)  = "true"
+evalExpr (BoolLiteral False) = "false"
+evalExpr (NumberLiteral num) = show num
+evalExpr (StringLiteral str) = str
+evalExpr (ArrayLiteral arr)  = "[" ++ intercalate "," (map evalExpr arr) ++ "]"
+evalExpr (VariableDeclaration ident operator expr) = "var " ++ ident ++ " " ++ operator ++ " " ++ evalExpr expr
+
+evalStatement (Block statements) = "{\n" ++ intercalate ";\n" (map (("    " ++) . evalStatement) statements) ++ "\n}"
+evalStatement (WhileStatement expr statement) = "while (" ++ evalExpr expr ++ ") " ++ evalStatement statement 
+
+evalJS' parsed = (map evalStatement parsed)
 
 evalJS (Right parsed) = (intercalate ";\n" (evalJS' parsed)) ++ ";"  
 evalJS _ = ""
