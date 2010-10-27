@@ -23,7 +23,10 @@ evalTLExpr d decl@(VariableDeclaration _ _ _) = "var " ++ evalExpr d decl
 evalTLExpr d expr = evalExpr d expr
 
 evalStatement d (Block statements) = "{\n" ++ intercalate ";\n" (map (("    " ++) . evalStatement d) (evalContinuations statements)) ++ "\n}"
-evalStatement d (WhileStatement expr statement) = "while (" ++ evalExpr d expr ++ ") " ++ evalStatement d statement 
+evalStatement d (WhileStatement expr statement) = "(function qs_while () { \n if (" ++ evalExpr d expr ++ ") " ++ evalStatement d (addRecurse statement) ++ "\n})()"
+    where addRecurse (Block st) = Block (st ++ [IfStatement (expr) $ TopLevelExpression $ FunctionCall "qs_while" []])
+          addRecurse st = addRecurse (Block [st])
+
 evalStatement d (TopLevelExpression expr) = evalTLExpr d expr
 evalStatement d (ReturnStatement expr) = "return " ++ evalExpr d expr
 evalStatement d (IfStatement expr statement) = "if (" ++ evalExpr d expr ++ ") " ++ evalStatement d statement
