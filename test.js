@@ -1,3 +1,7 @@
+testOne   <- require("test1")
+testTwo   <- require("test2")
+testThree <- require("test3")
+
 function getOne () {
   next (1);
 }
