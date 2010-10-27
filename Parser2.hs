@@ -8,7 +8,7 @@ type Identifier = String
 type Operator = String
 
 data Expression = VariableDeclaration Identifier Operator Expression
-                | FunctionDeclaration [Identifier] Statement
+                | FunctionDeclaration Bool (Maybe Identifier) [Identifier] Statement
                 | IdentifierLookup Identifier
                 | FunctionCall Identifier [Expression]
                 | InfixOperation Expression Identifier Expression
@@ -18,13 +18,18 @@ data Expression = VariableDeclaration Identifier Operator Expression
                 | NumberLiteral Float
                 | StringLiteral String
                 | ArrayLiteral [Expression]
-                  deriving (Show)
+                | MemberLookup Identifier Expression
+                | Continuate
+                | NextReturn [Expression]
+                  deriving (Show,Eq)
 
 data Statement = Block [Statement]
                | ReturnStatement Expression
+               | IfStatement Expression Statement
                | WhileStatement Expression Statement
                | TopLevelExpression Expression
-                 deriving (Show)
+               | Continuation Identifier Expression
+                 deriving (Show,Eq)
 
 infixOperator = choice [symbol "+"
                        ,symbol "-"
@@ -45,7 +50,7 @@ expression = do
   return ex
 
 expression' = do
-  ex <- try wrappedExpression <|> try functionDeclaration <|> try functionCall <|> try variableDeclaration <|> try literal <|> try identifierLookup 
+  ex <- nextReturn <|> try continuate <|> try wrappedExpression <|> try memberLookup <|> try functionDeclaration <|> try functionCall <|> try variableDeclaration <|> try literal <|> try identifierLookup 
   optional whiteSpace
   return ex
 
@@ -55,13 +60,20 @@ wrappedExpression = do
   symbol ")"
   return (WrappedExpression ex)
 
-identifier = do ident <- many1 letter
-                optional whiteSpace
-                return ident
+identifier = do 
+  ident <- many1 (letter <|> char '_')
+  optional whiteSpace
+  return ident
 
 identifierLookup = do
   ident <- identifier
   return $ IdentifierLookup ident
+
+memberLookup = do
+  obj <- identifier
+  symbol "."
+  member <- try memberLookup <|> try functionCall <|> try identifierLookup
+  return $ MemberLookup obj member
 
 functionCall = do
   ident <- identifier
@@ -71,19 +83,32 @@ functionCall = do
   symbol ")"
   return $ FunctionCall ident args
 
+nextReturn = do
+  ident <- symbol "next"
+  symbol "("
+  args <- arguments
+  optional $ whiteSpace
+  symbol ")"
+  return $ NextReturn args
+
+
+continuate = do
+  symbol "continuation"
+  notFollowedBy identifier
+  return $ Continuate
+
 arguments = do
   sepBy expression (try $ symbol ",")
 
 functionDeclaration = do
-  symbol "function"
+  symbol "function" <|> symbol "\\"
   name <- optionMaybe identifier
   symbol "("
   params <- sepBy identifier (symbol ",")
   symbol ")"
   stat <- block
-  return $ case name of 
-    Nothing -> FunctionDeclaration params stat
-    Just n  -> VariableDeclaration n "=" (FunctionDeclaration params stat)
+  return $ FunctionDeclaration False name params stat
+
 
 literal = do lit <- nullLiteral <|> boolLiteral <|> numberLiteral <|> stringLiteral  <|> arrayLiteral
              notFollowedBy identifier
@@ -135,7 +160,7 @@ infixOperation = do
 
 -- Statements
 
-statement = try returnStatement <|> try whileStatement <|> try topLevelExpression
+statement = try continuation <|> try ifStatement <|> try returnStatement <|> try whileStatement <|> try topLevelExpression <?> "statement"
 
 endOfStatement = do
   choice [newline, char ';', eof >> return ' '] <?> "end of statement"
@@ -158,9 +183,16 @@ block = do
 endOfBlock = symbol "}" >> return ()
 
 topLevelExpression = do
-  expr <- try functionCall <|> try variableDeclaration <|> try functionDeclaration
+  expr <- try nextReturn <|> try memberLookup <|> try functionCall <|> try variableDeclaration <|> try functionDeclaration
   optional endOfStatement
   return $ TopLevelExpression expr
+
+continuation = do
+  ident <- identifier 
+  symbol "<-"
+  expr <- expression
+  optional endOfStatement
+  return $ Continuation ident expr
 
 whileStatement = do
   symbol "while"
@@ -172,3 +204,11 @@ whileStatement = do
   optional endOfStatement
   return $ WhileStatement exp stat
   
+ifStatement = do
+  symbol "if"
+  symbol "("
+  exp <- expression
+  symbol ")" <?> "closing para"
+  state <- try block <|> try statement
+  optional endOfStatement
+  return $ IfStatement exp state
