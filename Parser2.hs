@@ -200,7 +200,7 @@ assignmentStatement = do
   return $ AssignmentStatement (not $ isNothing init) assign
 
 topLevelExpression = do
-  expr <- try nextReturn <|> try memberLookup <|> try functionCall <|> try functionDeclaration
+  expr <- try refCont <|> try nextReturn <|> try memberLookup <|> try functionCall <|> try functionDeclaration
   optional endOfStatement
   return $ TopLevelExpression expr
 
@@ -216,7 +216,13 @@ continuation = do
                         return params
         contIdent = do ident <- identifier
                        return [ident]
-       
+
+refCont = do
+  symbol "%"
+  call <- functionCall
+  return $ addEmptyCallback call
+  where addEmptyCallback (FunctionCall ident expressions) = 
+            FunctionCall ident (expressions ++ [FunctionDeclaration True Nothing [] (Block [TopLevelExpression (FunctionCall "void" [NumberLiteral 0.0])])])
 
 whileStatement = do
   symbol "while"

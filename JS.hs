@@ -34,13 +34,10 @@ evalStatement d (ReturnStatement expr) = "return " ++ evalExpr d expr
 evalStatement d (IfStatement expr statement) = "if (" ++ evalExpr d expr ++ ") " ++ evalStatement d statement
 evalStatement d (ElseStatement statment) = "else " ++ evalStatement d statment
 evalStatement d (AssignmentStatement isinit expr) = (if isinit then "var " else "") ++ evalExpr d expr
-
+evalStatement d (Continuation _ _) = error "Unable to eval continuation"
 evalContinuations :: [Statement] -> [Statement]
 evalContinuations [] = []
 evalContinuations ((Continuation ident expr):xs) = [TopLevelExpression $ FunctionCall (getIdent expr) (insertInParam expr (FunctionDeclaration True Nothing ident (Block $ evalContinuations xs)))]
-    where getIdent (FunctionCall ident _) = ident
-          insertInParam (FunctionCall ident args) rep = 
-              if any (== Continuate) args then map (\x-> if x == Continuate then rep else x) args else args ++ [rep]
 
 evalContinuations ((EachStatement ident expr statement):xs) = [TopLevelExpression $ FunctionCall "eachAsync" 
                                                                [expr
@@ -51,8 +48,12 @@ evalContinuations ((EachStatement ident expr statement):xs) = [TopLevelExpressio
 
 evalContinuations (x:xs) = x : evalContinuations xs
 
+getIdent (FunctionCall ident _) = ident
+insertInParam (FunctionCall ident args) rep = 
+              if any (== Continuate) args then map (\x-> if x == Continuate then rep else x) args else args ++ [rep]
+
 
 evalJS' parsed = (map (evalStatement 0) (evalContinuations parsed))
 
-evalJS (Right parsed) = "require('./js/rt.js').globalLoadIterators()\n\n" ++ (intercalate ";\n" (evalJS' parsed)) ++ ";"  
+evalJS (Right parsed) = "require('./js/rt.js').globalLoadIterators()\n\n" ++ (intercalate "\n" (evalJS' parsed)) ++ ";"  
 evalJS _ = ""
