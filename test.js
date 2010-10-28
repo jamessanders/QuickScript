@@ -1,29 +1,38 @@
-testOne   <- require("test1")
-testTwo   <- require("test2")
-testThree <- require("test3")
+var fs   = require("fs");
+var p    = require("path");
 
-function getOne () {
-  next (1);
-}
-function getTwo () {
-  next (2);
-}
-function getThree () {
-  one <- getOne();
-  two <- getTwo();
-  added <- add (one, two);
-  next(added);
-}
-function add(a, b) {
-  next(a+b);
-}
-function rand (max) {
-  next(Math.floor(Math.random()*max));
+function print (str) {
+  process.stdout.write(str + "\n", 'ascii')
+  next()
 }
 
-r = 0;
-while (r < 201) {
-  three <- getThree();
-  r <- rand(200);
-  console.log(r);
+function is_dir(path) {
+  ex <- p.exists(path)
+  if (ex) {
+    (err, stat) <- fs.stat(path);  
+    next(stat.nlink != 1)
+  } else {
+    next(false);
+  }
 }
+
+function readDir (path) {
+  x <- print (path)
+  function aux (a, b) {
+    (err, d) <- readDir(b);
+    if (err) next (a.concat(b));
+    else next(a.concat(d));  
+  }
+  isdir <- is_dir(path);
+  if (isdir) {
+    (err, dir) <- fs.readdir(path);
+    all <- foldAsync(aux, [path], map( \(d) return p.join(path,d), dir));
+    next(err, all);
+  } else {
+    next("Not a directory",[])
+  }
+};
+
+var c = 2
+(err, accum) <- readDir(process.argv[c]);
+

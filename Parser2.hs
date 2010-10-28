@@ -26,9 +26,12 @@ data Expression = VariableDeclaration Identifier Operator Expression
 data Statement = Block [Statement]
                | ReturnStatement Expression
                | IfStatement Expression Statement
+               | ElseStatement Statement
                | WhileStatement Expression Statement
                | TopLevelExpression Expression
-               | Continuation Identifier Expression
+               | AssignmentStatement Bool Expression
+               | Continuation [Identifier] Expression
+               | EachStatement Identifier Expression Statement
                  deriving (Show,Eq)
 
 infixOperator = choice [symbol "+"
@@ -37,10 +40,11 @@ infixOperator = choice [symbol "+"
                        ,symbol "/"
                        ,symbol "=="
                        ,symbol "!="
+                       ,symbol ">="
+                       ,symbol "<="
                        ,symbol ">"
                        ,symbol "<"
-                       ,symbol ">="
-                       ,symbol "<="]
+                       ]
 
 whiteSpace = try spaces
 
@@ -50,7 +54,7 @@ expression = do
   return ex
 
 expression' = do
-  ex <- nextReturn <|> try continuate <|> try wrappedExpression <|> try memberLookup <|> try functionDeclaration <|> try functionCall <|> try variableDeclaration <|> try literal <|> try identifierLookup 
+  ex <- try nextReturn <|> try continuate <|> try wrappedExpression <|> try memberLookup <|> try functionDeclaration <|> try functionCall <|> try variableDeclaration <|> try literal <|> try identifierLookup 
   optional whiteSpace
   return ex
 
@@ -61,7 +65,7 @@ wrappedExpression = do
   return (WrappedExpression ex)
 
 identifier = do 
-  ident <- many1 (letter <|> char '_')
+  ident <- many1 (letter <|> char '_' <|> char '.' <|> char '$' <|> char '[' <|> char ']')
   optional whiteSpace
   return ident
 
@@ -106,7 +110,7 @@ functionDeclaration = do
   symbol "("
   params <- sepBy identifier (symbol ",")
   symbol ")"
-  stat <- block
+  stat <- try block <|> try statement
   return $ FunctionDeclaration False name params stat
 
 
@@ -145,7 +149,6 @@ arrayLiteral = do
   return $ ArrayLiteral expr
 
 variableDeclaration = do
-  optional $ symbol "var"
   ident <- identifier <?> "identifier"
   whiteSpace
   operator <- choice [symbol "=", symbol "+=", symbol "-=", symbol "/=", symbol "*="] <?> "operator"
@@ -160,7 +163,15 @@ infixOperation = do
 
 -- Statements
 
-statement = try continuation <|> try ifStatement <|> try returnStatement <|> try whileStatement <|> try topLevelExpression <?> "statement"
+statement = try assignmentStatement 
+            <|> try eachStatement
+            <|> try continuation 
+            <|> try ifStatement 
+            <|> try elseStatement
+            <|> try returnStatement 
+            <|> try whileStatement 
+            <|> try topLevelExpression 
+            <?> "statement"
 
 endOfStatement = do
   choice [newline, char ';', eof >> return ' '] <?> "end of statement"
@@ -182,17 +193,30 @@ block = do
 
 endOfBlock = symbol "}" >> return ()
 
+assignmentStatement = do
+  init <- optionMaybe (symbol "var")
+  assign <- variableDeclaration
+  optional endOfStatement
+  return $ AssignmentStatement (not $ isNothing init) assign
+
 topLevelExpression = do
-  expr <- try nextReturn <|> try memberLookup <|> try functionCall <|> try variableDeclaration <|> try functionDeclaration
+  expr <- try nextReturn <|> try memberLookup <|> try functionCall <|> try functionDeclaration
   optional endOfStatement
   return $ TopLevelExpression expr
 
 continuation = do
-  ident <- identifier 
+  ident <- contParams <|> contIdent
   symbol "<-"
   expr <- expression
   optional endOfStatement
   return $ Continuation ident expr
+  where contParams = do symbol "("
+                        params <- identifier `sepBy` (symbol ",")
+                        symbol ")"
+                        return params
+        contIdent = do ident <- identifier
+                       return [ident]
+       
 
 whileStatement = do
   symbol "while"
@@ -203,6 +227,17 @@ whileStatement = do
   stat <- try block <|> try statement <?> "while loop body"
   optional endOfStatement
   return $ WhileStatement exp stat
+
+eachStatement = do
+  symbol "each"
+  symbol "("
+  ident <- identifier
+  symbol "<-"
+  expr  <- expression
+  symbol ")"
+  state <- try block <|> try statement
+  optional endOfStatement
+  return $ EachStatement ident expr state
   
 ifStatement = do
   symbol "if"
@@ -212,3 +247,9 @@ ifStatement = do
   state <- try block <|> try statement
   optional endOfStatement
   return $ IfStatement exp state
+
+elseStatement = do
+  symbol "else"
+  state <- try block <|> try statement
+  optional endOfStatement
+  return $ ElseStatement state
