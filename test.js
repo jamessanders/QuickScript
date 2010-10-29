@@ -1,8 +1,17 @@
 var fs   = require("fs");
 var p    = require("path");
 
+function wrap (v) {
+  next(v);
+}
+
 function print (str) {
-  next(process.stdout.write(str + "\n", 'ascii'));
+  if (process.stdout.write(str + "\n", 'ascii')) {
+    next();
+  } else {
+    %process.nextTick();
+    next();
+  }
 }
 
 function is_dir(path) {
@@ -32,7 +41,7 @@ function readDir (path) {
   }
 };
 
-var c = 2;
+c <- wrap(2)
 if (process.argv[c]) {
   (err, accum) <- readDir(process.argv[c]);
   %print("Finished");
@@ -40,3 +49,6 @@ if (process.argv[c]) {
   %print ("You must provide a path");
 }
 
+err <- process.on('uncaughtException')
+console.log(err)
+process.exit()

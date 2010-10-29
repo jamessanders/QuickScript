@@ -164,6 +164,7 @@ infixOperation = do
 -- Statements
 
 statement = try assignmentStatement 
+            <|> try refCont
             <|> try eachStatement
             <|> try continuation 
             <|> try ifStatement 
@@ -200,7 +201,7 @@ assignmentStatement = do
   return $ AssignmentStatement (not $ isNothing init) assign
 
 topLevelExpression = do
-  expr <- try refCont <|> try nextReturn <|> try memberLookup <|> try functionCall <|> try functionDeclaration
+  expr <- try nextReturn <|> try memberLookup <|> try functionCall <|> try functionDeclaration
   optional endOfStatement
   return $ TopLevelExpression expr
 
@@ -220,7 +221,8 @@ continuation = do
 refCont = do
   symbol "%"
   call <- functionCall
-  return $ addEmptyCallback call
+  optional endOfStatement
+  return $ Continuation [] call
   where addEmptyCallback (FunctionCall ident expressions) = 
             FunctionCall ident (expressions ++ [FunctionDeclaration True Nothing [] (Block [TopLevelExpression (FunctionCall "void" [NumberLiteral 0.0])])])
 
